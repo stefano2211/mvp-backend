@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+pillow==11.1.0
+# ultralytics  # For YOLOv8
+# transformers # For Florence-2
+# torch torchvision

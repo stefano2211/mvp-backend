@@ -1,0 +1,123 @@
+networks:
+  optimus_net:
+    driver: bridge
+
+services:
+  # ─────────────────────────────────────────────
+  # Service 1: FastAPI Bridge
+  # The public-facing HTTP API. The Windows client
+  # sends screenshots here. The Gradio UI reads
+  # state from here.
+  # ─────────────────────────────────────────────
+  optimus_api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: optimus_api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - shared_data:/app/shared
+    networks:
+      - optimus_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Service 2: LangChain Deep Agents Core
+  # System-1 / System-2 logic. Not exposed to the
+  # outside world — only accessible from optimus_api
+  # and optimus_ui via the internal Docker network.
+  # ─────────────────────────────────────────────
+  optimus_agents:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    container_name: optimus_agents
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - shared_data:/app/shared
+    networks:
+      - optimus_net
+    depends_on:
+      optimus_api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Service 3: Gradio Dashboard
+  # The visual interface. Reads state and logs
+  # from optimus_api.
+  # ─────────────────────────────────────────────
+  optimus_ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: optimus_ui
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    networks:
+      - optimus_net
+    depends_on:
+      - optimus_api
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Service 4: vLLM Engine (Qwen3.5-27B-FP8)
+  # ─────────────────────────────────────────────
+  vllm_engine:
+    image: vllm/vllm-openai:latest
+    container_name: vllm_engine
+    ports:
+      - "8002:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 8192 --gpu-memory-utilization 0.6 --trust-remote-code
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - optimus_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # Service 5: OmniParser API
+  # ─────────────────────────────────────────────
+  omniparser_api:
+    build:
+      context: ./omniparser
+      dockerfile: Dockerfile
+    container_name: omniparser_api
+    ports:
+      - "8003:8003"
+    networks:
+      - optimus_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  shared_data:
+    driver: local

@@ -1,0 +1,10 @@
+[project]
+name = "industrial-digital-optimus"
+version = "1.0.0"
+description = "Industrial Digital Optimus POC — LangChain Deep Agents + Docker + Gradio"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
