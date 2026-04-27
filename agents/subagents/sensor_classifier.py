@@ -14,14 +14,15 @@ from tools.sensor_tools import get_sensor_data, list_active_alerts
 
 class SensorClassification(BaseModel):
     """Structured output from the sensor classifier subagent."""
+    reasoning: str = Field(description="2-3 sentences explaining the classification logic based on retrieved sensor data")
     urgency_level: str = Field(description="CRITICAL | HIGH | MEDIUM | LOW")
     alert_type: str = Field(description="THERMAL | MECHANICAL | PRESSURE | ELECTRICAL | COMMUNICATION | LEVEL | CHEMICAL")
     affected_system: str = Field(description="Name of the affected industrial system")
     estimated_root_cause: str = Field(description="Most likely cause in one sentence")
     immediate_action: str = Field(description="The single most important first action")
-    requires_evacuation: bool = Field(description="Whether evacuation is needed")
-    notify_roles: list[str] = Field(description="Roles to notify: MAINTENANCE, OPERATIONS, ENGINEERING, SAFETY")
-    confidence: float = Field(description="Confidence score 0.0-1.0", ge=0.0, le=1.0)
+    requires_evacuation: bool = Field(description="Whether evacuation is needed — true only for imminent danger to personnel")
+    notify_roles: list[str] = Field(description="Subset of: MAINTENANCE, OPERATIONS, ENGINEERING, SAFETY")
+    confidence: float = Field(description="Confidence score 0.0-1.0 — lower if data is anomalous or sensor may be malfunctioning", ge=0.0, le=1.0)
 
 
 # ── Sensor classifier model (System-1: Fast Intuition) ──────────────────────
