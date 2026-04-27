@@ -41,6 +41,10 @@ AGENTS_URL = os.getenv("AGENTS_SERVICE_URL", "http://optimus_agents:8001")
 MAX_LOOP_STEPS = int(os.getenv("MAX_LOOP_STEPS", "20"))
 
 # ─── In-Memory Shared State ──────────────────────────────────────────────────
+# NOTE: This state is process-local. If uvicorn runs with multiple workers,
+# each worker has its own copy and the Dev Mode "Continue" signal may not
+# propagate correctly. For production or multi-worker setups, migrate this
+# to Redis or a shared cache. Run with --workers 1 to avoid this issue.
 state: dict[str, Any] = {
     # Screenshot state
     "latest_screenshot_b64": None,
@@ -163,6 +167,7 @@ class ActionItem(BaseModel):
     text: Optional[str] = None
     keys: Optional[list[str]] = None
     seconds: Optional[float] = None
+    clicks: Optional[int] = None
     description: str = ""
 
 
@@ -219,7 +224,8 @@ async def run_agent_pipeline(alert: dict) -> None:
             next_action = result.get("next_action", {})
             state["next_action"] = next_action
 
-            add_log("INFO", "System1", f"Quick scan: {str(state['system1_text'])[:120]}")
+            s1_preview = (str(state["system1_text"])[:120] if state["system1_text"] else "(no System-1 output captured this step)")
+            add_log("INFO", "System1", s1_preview)
             add_log("INFO", "System2", f"Reasoning complete. Next action: {next_action.get('description', '?')}")
 
             # ── Dev Mode Pause ────────────────────────────────────────────────
@@ -337,9 +343,9 @@ def get_next_action():
         add_log("INFO", "Executor", f"Dispatching action: {action.get('description', action.get('action_type'))}")
         return action
     elif state["cycle_status"] == "executing":
-        # Queue is empty but we were executing → all actions consumed, transition to done
-        state["cycle_status"] = "done"
-        return {"action_type": "done", "description": "Cycle complete"}
+        # Queue is empty but loop may still be running (settling screen or planning next step)
+        # Let the loop itself decide when to transition to "done"
+        return {"action_type": "wait", "seconds": 1.0, "description": "Waiting for next action from agent"}
     elif state["cycle_status"] in ("done", "idle", "error"):
         return {"action_type": "done", "description": "Cycle complete"}
     else:

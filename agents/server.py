@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
 
-from .orchestrator import run_pipeline, run_step
+from orchestrator import run_pipeline, run_step
 
 app = FastAPI(
     title="Industrial Optimus Agents",

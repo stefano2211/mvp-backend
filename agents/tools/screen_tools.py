@@ -38,19 +38,22 @@ def get_latest_screenshot() -> Any:
         with open(metadata_file, "r") as f:
             metadata = json.load(f)
 
-    # Call OmniParser to get the Set-of-Marks annotated image
+    # Call OmniParser V2 to get the Set-of-Marks annotated image
+    # (YOLOv8 + Florence-2 inference takes ~2-5s per screenshot on GPU)
     import httpx
     omniparser_url = os.getenv("OMNIPARSER_URL", "http://omniparser_api:8003/parse")
-    interactive_elements = []
+    interactive_elements: list = []
     try:
-        r = httpx.post(omniparser_url, json={"image_b64": b64_data}, timeout=30.0)
+        r = httpx.post(omniparser_url, json={"image_b64": b64_data}, timeout=60.0)
         r.raise_for_status()
         parsed_data = r.json()
         if parsed_data.get("status") == "success":
             b64_data = parsed_data.get("annotated_image_b64", b64_data)
             interactive_elements = parsed_data.get("elements", [])
+            print(f"[screen_tools] OmniParser returned {len(interactive_elements)} elements "
+                  f"in {parsed_data.get('processing_time_ms', '?')}ms")
     except Exception as e:
-        print(f"Failed to call OmniParser: {e}")
+        print(f"[screen_tools] OmniParser call failed: {e}")
 
     age_seconds = time.time() - metadata.get("timestamp", 0)
 
@@ -69,20 +72,3 @@ def get_latest_screenshot() -> Any:
         {"type": "text", "text": json.dumps(info)},
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}}
     ]
-
-
-def describe_screen_region(x1: int, y1: int, x2: int, y2: int) -> str:
-    """
-    Request a description of a specific region of the screen.
-    Useful for focusing on specific UI elements like buttons or text fields.
-    
-    Args:
-        x1: Left coordinate of the region
-        y1: Top coordinate of the region
-        x2: Right coordinate of the region
-        y2: Bottom coordinate of the region
-    """
-    return json.dumps({
-        "region": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
-        "note": "Region crop analysis: coordinates recorded. Full screenshot analysis covers this region.",
-    })

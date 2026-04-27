@@ -83,7 +83,7 @@ services:
       - "8002:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
-    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 8192 --gpu-memory-utilization 0.6 --trust-remote-code
+    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 32768 --gpu-memory-utilization 0.92 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
@@ -107,8 +107,20 @@ services:
     container_name: omniparser_api
     ports:
       - "8003:8003"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+      - OMNIPARSER_BOX_THRESHOLD=0.05
+    volumes:
+      - omniparser_weights:/opt/OmniParser/weights
+      - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
       - optimus_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     deploy:
       resources:
         reservations:
@@ -120,4 +132,6 @@ services:
 
 volumes:
   shared_data:
+    driver: local
+  omniparser_weights:
     driver: local

@@ -24,7 +24,14 @@ import requests
 from PIL import Image
 from dotenv import load_dotenv
 
-from executor import execute_action
+try:
+    from executor import execute_action
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("executor", os.path.join(os.path.dirname(__file__), "executor.py"))
+    _executor = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_executor)
+    execute_action = _executor.execute_action
 
 load_dotenv()
 
@@ -102,6 +109,7 @@ def main():
     print("  ✅ API is ready! Starting capture loop...\n")
 
     last_action_type = "done"
+    idle_count = 0
 
     while True:
         loop_start = time.time()
@@ -121,20 +129,25 @@ def main():
             if action_type == "done":
                 print("  ✅ Cycle complete — agent has finished all actions.")
                 last_action_type = "done"
+                idle_count += 1
             elif action_type == "wait":
                 wait_s = action.get("seconds", 1.0)
                 print(f"  ⏳ Waiting {wait_s}s as instructed by agent...")
                 time.sleep(wait_s)
+                idle_count += 1
             else:
                 # Execute the action on Windows
                 execute_action(action)
                 last_action_type = action_type
+                idle_count = 0
         else:
             print("  💤 No action (agent is idle or thinking...)")
+            idle_count += 1
 
-        # 3. Maintain the configured interval
+        # 3. Adaptive interval: fast when active, slow when idle between cycles
+        effective_interval = INTERVAL if idle_count < 3 else 5.0
         elapsed = time.time() - loop_start
-        sleep_time = max(0, INTERVAL - elapsed)
+        sleep_time = max(0, effective_interval - elapsed)
         time.sleep(sleep_time)
 
 

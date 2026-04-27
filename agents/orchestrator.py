@@ -10,37 +10,69 @@ Supports two modes:
 """
 import json
 import os
-import time
 
 from deepagents import create_deep_agent
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import ToolMessage
 
-from .prompts.system2_orchestrator import SYSTEM2_ORCHESTRATOR_PROMPT
-from .subagents.sensor_classifier import sensor_classifier_subagent
-from .subagents.screen_analyzer import screen_analyzer_subagent
+from prompts.system2_orchestrator import SYSTEM2_ORCHESTRATOR_PROMPT
+from subagents.sensor_classifier import sensor_classifier_subagent
+from subagents.screen_analyzer import screen_analyzer_subagent
 
-from .tools.action_tools import plan_action, get_planned_actions, clear_action_log
+from tools.action_tools import plan_action, get_planned_actions, clear_action_log
 
 # ─── Model Configuration ─────────────────────────────────────────────────────
-# System-2 uses Qwen running locally on vLLM.
-# We configure it as an OpenAI compatible model.
-os.environ["OPENAI_API_BASE"] = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8002/v1")
-os.environ["OPENAI_API_KEY"] = "not-needed-for-local"
+# All models are served by the local vLLM container via its OpenAI-compatible API.
+VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8002/v1")
+VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 
+# System-2 (slow, deliberate reasoning) — main orchestrator.
 ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-27B-FP8")
 
-# ─── Build the Deep Agent ────────────────────────────────────────────────────
-orchestrator = create_deep_agent(
-    name="industrial-optimus",
+# Build a real ChatOpenAI client pointing at vLLM. We pass the model object
+# directly to deepagents instead of a "provider:model" string so that the
+# custom base_url (vLLM) is honored.
+system2_llm = ChatOpenAI(
     model=ORCHESTRATOR_MODEL,
+    base_url=VLLM_BASE_URL,
+    api_key=VLLM_API_KEY,
+    temperature=float(os.getenv("ORCHESTRATOR_TEMPERATURE", "0.2")),
+    timeout=120.0,
+)
+
+# ─── Build the Deep Agent ────────────────────────────────────────────────────
+# NOTE: deepagents.create_deep_agent does NOT accept a `name` kwarg.
+orchestrator = create_deep_agent(
+    model=system2_llm,
     system_prompt=SYSTEM2_ORCHESTRATOR_PROMPT,
-    tools=[
-        plan_action,
-    ],
+    tools=[plan_action],
     subagents=[
         sensor_classifier_subagent,   # System-1: fast sensor classification
         screen_analyzer_subagent,     # System-1: visual screen analysis (VLM)
     ],
 )
+
+
+def _extract_subagent_results(messages: list) -> tuple[str | None, str | None]:
+    """
+    Walk the message graph returned by the orchestrator and pull out the
+    raw output of each System-1 subagent. deepagents exposes subagent
+    invocations as ToolMessage entries whose `name` field equals the
+    subagent name registered in `create_deep_agent(subagents=[...])`.
+    """
+    screen_analysis: str | None = None
+    sensor_analysis: str | None = None
+
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            tool_name = getattr(msg, "name", None) or ""
+            content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+            if "screen-analyzer" in tool_name and not screen_analysis:
+                screen_analysis = content
+            elif "sensor-classifier" in tool_name and not sensor_analysis:
+                sensor_analysis = content
+
+    return screen_analysis, sensor_analysis
 
 
 async def run_step(
@@ -78,7 +110,6 @@ async def run_step(
     }, indent=2)
 
     # Build action history context for the prompt
-    history_lines = ""
     if action_history:
         history_lines = "\n\nACTIONS ALREADY EXECUTED IN THIS CYCLE:\n"
         for i, item in enumerate(action_history):
@@ -121,38 +152,35 @@ YOUR TASK FOR THIS STEP:
 """
 
     # The LLM prompt is what we send to the orchestrator (for UI transparency)
-    llm_prompt = f"Alert: {alert.get('task', '')} | Step: {step_number + 1} | History: {len(action_history)} actions done"
+    llm_prompt = (
+        f"Alert: {alert.get('task', '')} | "
+        f"Step: {step_number + 1} | "
+        f"History: {len(action_history)} actions done"
+    )
 
     # Invoke the orchestrator
     result = await orchestrator.ainvoke({
         "messages": [{"role": "user", "content": user_message}]
     })
 
-    # Extract final message text
-    final_message = result["messages"][-1].content if result.get("messages") else ""
+    messages = result.get("messages", []) if isinstance(result, dict) else []
+
+    # Final System-2 reasoning is the last AI message
+    final_message = ""
+    if messages:
+        last = messages[-1]
+        final_message = last.content if hasattr(last, "content") else str(last)
 
     # Retrieve the one action planned via plan_action tool
     planned_actions = get_planned_actions()
-    next_action = planned_actions[0] if planned_actions else {"action_type": "done", "description": "No action planned"}
+    next_action = (
+        planned_actions[0]
+        if planned_actions
+        else {"action_type": "done", "description": "No action planned"}
+    )
 
-    # Try to extract structured intermediate results from the message graph
-    screen_analysis = None
-    system1_result = None
-    try:
-        for msg in result.get("messages", []):
-            meta = getattr(msg, "additional_kwargs", {})
-            if meta.get("subagent") == "screen-analyzer":
-                screen_analysis = msg.content
-            elif meta.get("subagent") == "sensor-classifier":
-                system1_result = msg.content
-    except Exception:
-        pass
-
-    # Fallbacks if subagent messages not captured
-    if not screen_analysis:
-        screen_analysis = "Screen analysis performed internally by the agent."
-    if not system1_result:
-        system1_result = f"Quick scan: Alert = {alert.get('task', 'unknown')}"
+    # Extract real subagent outputs from the message graph
+    screen_analysis, system1_result = _extract_subagent_results(messages)
 
     return {
         "screen_analysis": screen_analysis,

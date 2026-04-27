@@ -1,7 +1,15 @@
+# NOTE: The real dependencies for OmniParser V2 are installed directly in the
+# Dockerfile, because we clone the microsoft/OmniParser repo and pick a
+# torch build with CUDA support. This file is kept for reference / local dev.
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.6
 pillow==11.1.0
-# ultralytics  # For YOLOv8
-# transformers # For Florence-2
-# torch torchvision
+# Real inference stack (installed in Dockerfile):
+#   torch torchvision (CUDA build)
+#   ultralytics==8.3.70          # YOLOv8 for icon detection
+#   transformers                 # Florence-2 for icon captioning
+#   easyocr + paddleocr          # OCR fallback
+#   supervision==0.18.0          # bbox drawing utilities
+#   einops==0.8.0 timm accelerate
+
