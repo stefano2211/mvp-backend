@@ -23,7 +23,7 @@ from tools.action_tools import plan_action, get_planned_actions, clear_action_lo
 
 # ─── Model Configuration ─────────────────────────────────────────────────────
 # All models are served by the local vLLM container via its OpenAI-compatible API.
-VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8002/v1")
+VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8000/v1")
 VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 
 # System-2 (slow, deliberate reasoning) — main orchestrator.

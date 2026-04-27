@@ -66,6 +66,8 @@ state: dict[str, Any] = {
     "action_queue": deque(maxlen=10),
     "action_history": [],          # History of all actions executed this cycle
     "next_action": None,           # The most recently planned action (for UI)
+    # Cancellation support
+    "cancel_event": asyncio.Event(),
 }
 # Rolling log buffer (last 200 entries)
 log_buffer: deque = deque(maxlen=200)
@@ -191,6 +193,12 @@ async def run_agent_pipeline(alert: dict) -> None:
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         for step in range(MAX_LOOP_STEPS):
+            # ── Check for cancellation ────────────────────────────────────
+            if state["cancel_event"].is_set():
+                add_log("WARN", "Loop", "🛑 Cycle cancelled by user.")
+                state["cycle_status"] = "done"
+                return
+
             state["loop_step"] = step + 1
             state["cycle_status"] = "analyzing"
             add_log("INFO", "Loop", f"Step {step + 1}/{MAX_LOOP_STEPS} — Analyzing screen...")
@@ -304,6 +312,7 @@ async def trigger_alert(payload: AlertTrigger, background_tasks: BackgroundTasks
     state["action_history"] = []
     state["loop_step"] = 0
     state["action_queue"].clear()
+    state["cancel_event"].clear()
     state["cycle_status"] = "starting"
 
     add_log("INFO", "UI", f"Alert triggered: {alert['label']} (dev_mode={payload.dev_mode})")
@@ -358,6 +367,18 @@ def dev_mode_continue():
     state["dev_mode_continue"].set()
     add_log("INFO", "DevMode", "▶️ User pressed Continue — resuming loop.")
     return {"status": "continuing"}
+
+
+@app.post("/cancel")
+def cancel_cycle():
+    """Cancel the currently running screenshot loop."""
+    if state["cycle_status"] in ("idle", "done", "error"):
+        return {"status": "nothing_to_cancel"}
+    state["cancel_event"].set()
+    # Also unblock dev-mode pause so the loop can exit
+    state["dev_mode_continue"].set()
+    add_log("WARN", "API", "🛑 User requested cancellation.")
+    return {"status": "cancelling"}
 
 
 @app.get("/status")

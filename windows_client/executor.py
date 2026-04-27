@@ -6,9 +6,11 @@ Runs on the Windows host via pyautogui.
 
 Supported action types:
   - click(x, y)         — Left-click at coordinates
-  - type(text)          — Type a string of text
+  - double_click(x, y)  — Double-click at coordinates
+  - type(text)          — Type a string of text (Unicode safe)
   - hotkey(keys)        — Press a keyboard shortcut (e.g., ['ctrl', 's'])
   - wait(seconds)       — Pause for N seconds
+  - scroll(clicks)      — Scroll the mouse wheel
   - done                — No-op: signals end of cycle
 """
 import time
@@ -24,6 +26,73 @@ try:
 except ImportError:
     PYAUTOGUI_AVAILABLE = False
     print("[Executor] WARNING: pyautogui not installed — running in DRY RUN mode.")
+
+
+# ─── Resolution Scaling ──────────────────────────────────────────────────────
+# OmniParser receives the 1280×720 downscaled screenshot, so all coordinates
+# returned by the agent are in that space.  We need to scale them to the
+# real monitor resolution before clicking.
+
+SCREENSHOT_WIDTH = 1280
+SCREENSHOT_HEIGHT = 720
+
+# Detect the real primary monitor resolution
+try:
+    import mss
+    with mss.mss() as sct:
+        _mon = sct.monitors[1]
+        REAL_WIDTH = _mon["width"]
+        REAL_HEIGHT = _mon["height"]
+    print(f"[Executor] Monitor: {REAL_WIDTH}x{REAL_HEIGHT}  |  Screenshot: {SCREENSHOT_WIDTH}x{SCREENSHOT_HEIGHT}")
+except Exception:
+    REAL_WIDTH = SCREENSHOT_WIDTH
+    REAL_HEIGHT = SCREENSHOT_HEIGHT
+    print("[Executor] WARNING: Could not detect monitor resolution, assuming 1280x720.")
+
+
+def _scale_coord(x: int | None, y: int | None) -> tuple[int | None, int | None]:
+    """Scale coordinates from screenshot space to real monitor space."""
+    if x is not None:
+        x = int(x * REAL_WIDTH / SCREENSHOT_WIDTH)
+    if y is not None:
+        y = int(y * REAL_HEIGHT / SCREENSHOT_HEIGHT)
+    return x, y
+
+
+def _type_text_unicode(text: str) -> None:
+    """
+    Type text with full Unicode support on Windows.
+    pyautogui.typewrite() only handles ASCII.  For any non-ASCII characters
+    we fall back to the clipboard (paste) approach using ctypes, which
+    requires no extra dependencies on Windows.
+    """
+    try:
+        text.encode("ascii")
+        # Pure ASCII — typewrite is fine and gives more natural keystroke simulation
+        pyautogui.typewrite(text, interval=0.05)
+    except UnicodeEncodeError:
+        # Unicode text — use clipboard + Ctrl+V
+        try:
+            import ctypes
+            CF_UNICODETEXT = 13
+            kernel32 = ctypes.windll.kernel32
+            user32 = ctypes.windll.user32
+
+            user32.OpenClipboard(0)
+            user32.EmptyClipboard()
+            # Allocate global memory and copy the string
+            hMem = kernel32.GlobalAlloc(0x0042, (len(text) + 1) * 2)
+            pMem = kernel32.GlobalLock(hMem)
+            ctypes.cdll.msvcrt.wcscpy(ctypes.c_wchar_p(pMem), text)
+            kernel32.GlobalUnlock(hMem)
+            user32.SetClipboardData(CF_UNICODETEXT, hMem)
+            user32.CloseClipboard()
+
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.15)
+        except Exception as clip_err:
+            print(f"    ⚠️  Clipboard paste failed ({clip_err}), falling back to typewrite (ASCII only)")
+            pyautogui.typewrite(text, interval=0.05)
 
 
 def _dry_run_log(action: dict) -> None:
@@ -49,8 +118,7 @@ def execute_action(action: dict) -> None:
 
     try:
         if action_type == "click":
-            x = action.get("x")
-            y = action.get("y")
+            x, y = _scale_coord(action.get("x"), action.get("y"))
             if x is not None and y is not None:
                 # Smooth mouse movement for reliability
                 pyautogui.moveTo(x, y, duration=0.3)
@@ -61,8 +129,7 @@ def execute_action(action: dict) -> None:
                 print("    ⚠️  Click action missing x/y coordinates, skipping.")
 
         elif action_type == "double_click":
-            x = action.get("x")
-            y = action.get("y")
+            x, y = _scale_coord(action.get("x"), action.get("y"))
             if x is not None and y is not None:
                 pyautogui.doubleClick(x, y)
                 print(f"    → Double-clicked at ({x}, {y})")
@@ -70,7 +137,7 @@ def execute_action(action: dict) -> None:
         elif action_type == "type":
             text = action.get("text", "")
             if text:
-                pyautogui.typewrite(text, interval=0.05)
+                _type_text_unicode(text)
                 print(f"    → Typed: '{text}'")
 
         elif action_type == "hotkey":
@@ -85,8 +152,7 @@ def execute_action(action: dict) -> None:
             print(f"    → Waited {seconds}s")
 
         elif action_type == "scroll":
-            x = action.get("x", 0)
-            y = action.get("y", 0)
+            x, y = _scale_coord(action.get("x", 0), action.get("y", 0))
             clicks = action.get("clicks", 3)
             pyautogui.scroll(clicks, x=x, y=y)
             print(f"    → Scrolled {clicks} at ({x}, {y})")

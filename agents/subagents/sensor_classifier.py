@@ -28,7 +28,7 @@ class SensorClassification(BaseModel):
 # Configurable separately from System-2; defaults to the same model so the MVP
 # can run on a single-GPU deployment.
 SYSTEM1_MODEL = os.getenv("SYSTEM1_MODEL", os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-27B-FP8"))
-VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8002/v1")
+VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8000/v1")
 VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 
 sensor_llm = ChatOpenAI(

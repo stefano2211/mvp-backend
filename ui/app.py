@@ -142,6 +142,14 @@ def dev_mode_continue():
     return f"▶️ Continue signal sent: {result.get('status', 'unknown')}"
 
 
+def cancel_cycle():
+    result = api_post("/cancel", {})
+    status = result.get("status", "unknown")
+    if status == "nothing_to_cancel":
+        return "💤 Nothing to cancel — no active cycle."
+    return f"🛑 Cancel signal sent: {status}"
+
+
 # ─── Build the Gradio UI ─────────────────────────────────────────────────────
 
 ALERT_CHOICES = get_alert_choices()
@@ -197,6 +205,8 @@ with gr.Blocks(
             )
         with gr.Column(scale=1):
             trigger_btn = gr.Button("🚀 Trigger Alert", variant="primary", size="lg")
+        with gr.Column(scale=1):
+            cancel_btn = gr.Button("🛑 Cancel", variant="stop", size="lg")
         with gr.Column(scale=1):
             refresh_btn = gr.Button("🔄 Refresh", variant="secondary", size="lg")
 
@@ -284,9 +294,9 @@ with gr.Blocks(
                 interactive=False,
             )
         with gr.Column():
-            gr.Markdown("✅ **Continue Execution** (Dev Mode)")
+            gr.Markdown("✅ **Execution Control** (Dev Mode)")
             dev_continue_btn = gr.Button("▶️ Continue Execution (only in DEV_MODE)", variant="stop", size="lg")
-            dev_status = gr.Textbox(label="Dev Mode Status", value="", interactive=False, lines=2)
+            dev_status = gr.Textbox(label="Control Status", value="", interactive=False, lines=2)
 
     gr.Markdown(
         "<div style='text-align:center; color:#64748b; font-size:0.8em; margin-top:8px;'>"
@@ -317,6 +327,11 @@ with gr.Blocks(
 
     dev_continue_btn.click(
         fn=dev_mode_continue,
+        outputs=[dev_status],
+    )
+
+    cancel_btn.click(
+        fn=cancel_cycle,
         outputs=[dev_status],
     )
 

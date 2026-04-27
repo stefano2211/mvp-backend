@@ -3,21 +3,18 @@ Action Tools — tools for creating and logging remediation actions.
 """
 import json
 import time
+import threading
 from typing import Optional
 
 
-import contextvars
-
-# In-memory action log for the current session, thread-safe for async contexts
-_action_log_var: contextvars.ContextVar[list[dict]] = contextvars.ContextVar("_action_log")
-
-def _get_action_log() -> list[dict]:
-    try:
-        return _action_log_var.get()
-    except LookupError:
-        l = []
-        _action_log_var.set(l)
-        return l
+# In-memory action log for the current cycle.
+# We use a plain list + lock instead of contextvars.ContextVar because
+# deepagents may execute tool calls in child asyncio.Tasks that receive
+# a *copy* of the parent context, which would silently discard the
+# appended actions.  A module-level list is safe because the agents
+# service runs with a single uvicorn worker (--workers 1).
+_action_log: list[dict] = []
+_action_log_lock = threading.Lock()
 
 
 def plan_action(
@@ -41,6 +38,7 @@ def plan_action(
         text: Text to type for 'type' actions
         keys: List of keys for 'hotkey' actions (e.g., ['ctrl', 's'])
         seconds: Duration in seconds for 'wait' actions
+        clicks: Number of scroll clicks for 'scroll' actions
     
     Returns:
         JSON confirmation of the planned action
@@ -78,16 +76,19 @@ def plan_action(
             return json.dumps({"error": "Scroll action requires 'clicks' parameter (positive up, negative down)."})
         action.update({"clicks": clicks, "x": x or 0, "y": y or 0})
 
-    log = _get_action_log()
-    log.append(action)
-    return json.dumps({"status": "queued", "action": action, "queue_position": len(log)})
+    with _action_log_lock:
+        _action_log.append(action)
+        position = len(_action_log)
+    return json.dumps({"status": "queued", "action": action, "queue_position": position})
 
 
 def get_planned_actions() -> list[dict]:
     """Internal helper to retrieve all planned actions from the current cycle."""
-    return [a for a in _get_action_log() if a.get("action_type")]
+    with _action_log_lock:
+        return [a for a in _action_log if a.get("action_type")]
 
 
 def clear_action_log() -> None:
     """Internal helper to reset the action log for a new cycle."""
-    _action_log_var.set([])
+    with _action_log_lock:
+        _action_log.clear()

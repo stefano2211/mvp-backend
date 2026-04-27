@@ -76,10 +76,18 @@ def get_sensor_data(sensor_id: str) -> str:
     if not sensor:
         return json.dumps({"error": f"Sensor '{sensor_id}' not found in database."})
     
-    # Calculate deviation percentage
-    threshold = sensor["normal_range"]["max"]
-    deviation_pct = ((sensor["current_value"] - threshold) / threshold * 100) if threshold != 0 else 0
-    sensor["deviation_from_threshold_pct"] = round(deviation_pct, 2)
+    # Calculate deviation percentage from the critical threshold
+    crit = sensor["critical_threshold"]
+    current = sensor["current_value"]
+    if sensor["unit"] in ("status", "status (1=OK, 0=FAIL)"):
+        # Binary status sensors: report as OK / FAIL instead of a percentage
+        sensor["deviation_from_threshold_pct"] = None
+        sensor["status_label"] = "FAIL" if current == 0 else "OK"
+    elif crit and crit != 0:
+        deviation_pct = ((current - crit) / abs(crit)) * 100
+        sensor["deviation_from_threshold_pct"] = round(deviation_pct, 2)
+    else:
+        sensor["deviation_from_threshold_pct"] = 0.0
     sensor["trend"] = "RISING" if sensor["history_1h"][-1] > sensor["history_1h"][-2] else "FALLING"
     
     return json.dumps(sensor)
