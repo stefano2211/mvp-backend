@@ -83,7 +83,7 @@ services:
       - "8002:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
-    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 32768 --gpu-memory-utilization 0.92 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 16384 --gpu-memory-utilization 0.80 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
