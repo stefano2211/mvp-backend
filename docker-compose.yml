@@ -84,7 +84,7 @@ services:
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     command: >-
-      vllm serve Qwen/Qwen3.5-9B
+      --model Qwen/Qwen3.5-9B
       --port 8000
       --max-model-len 32768
       --gpu-memory-utilization 0.90
@@ -92,7 +92,7 @@ services:
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --enable-prefix-caching
-      --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+      --speculative-config {"method":"qwen3_next_mtp","num_speculative_tokens":2}
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
