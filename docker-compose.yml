@@ -111,7 +111,6 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - OMNIPARSER_BOX_THRESHOLD=0.05
     volumes:
-      - omniparser_weights:/opt/OmniParser/weights
       - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
       - optimus_net
