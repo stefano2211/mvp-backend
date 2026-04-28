@@ -27,7 +27,7 @@ VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8000/v1")
 VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 
 # System-2 (slow, deliberate reasoning) — main orchestrator.
-ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-27B-FP8")
+ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-9B")
 
 # Build a real ChatOpenAI client pointing at vLLM. We pass the model object
 # directly to deepagents instead of a "provider:model" string so that the
@@ -37,7 +37,7 @@ system2_llm = ChatOpenAI(
     base_url=VLLM_BASE_URL,
     api_key=VLLM_API_KEY,
     temperature=float(os.getenv("ORCHESTRATOR_TEMPERATURE", "0.2")),
-    timeout=120.0,
+    timeout=240.0,
 )
 
 # ─── Build the Deep Agent ────────────────────────────────────────────────────

@@ -191,7 +191,7 @@ async def run_agent_pipeline(alert: dict) -> None:
     state["action_history"] = []
     state["loop_step"] = 0
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         for step in range(MAX_LOOP_STEPS):
             # ── Check for cancellation ────────────────────────────────────
             if state["cancel_event"].is_set():
@@ -219,7 +219,9 @@ async def run_agent_pipeline(alert: dict) -> None:
                 response.raise_for_status()
                 result = response.json()
             except Exception as e:
-                add_log("ERROR", "Loop", f"Step {step + 1} failed: {e}")
+                import traceback
+                tb = traceback.format_exc()
+                add_log("ERROR", "Loop", f"Step {step + 1} failed: {e}\n{tb}")
                 state["cycle_status"] = "error"
                 return
 

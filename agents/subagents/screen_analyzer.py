@@ -40,7 +40,7 @@ class ScreenAnalysis(BaseModel):
 # Per architecture spec: System-1 SHOULD be a smaller/faster model for quick
 # visual scanning. It is configurable via the SYSTEM1_MODEL env var; if unset,
 # it falls back to the same model as System-2 (single-GPU deployments).
-SYSTEM1_MODEL = os.getenv("SYSTEM1_MODEL", os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-27B-FP8"))
+SYSTEM1_MODEL = os.getenv("SYSTEM1_MODEL", os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-9B"))
 VLLM_BASE_URL = os.getenv("LOCAL_VLLM_URL", "http://vllm_engine:8000/v1")
 VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 
