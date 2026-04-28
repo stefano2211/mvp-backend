@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus-x11 \
     procps \
     curl \
+    python3-tk \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -6,6 +6,8 @@ echo "  🖥️  Digital Optimus — Virtual Desktop"
 echo "=========================================="
 
 # 1. Start the virtual display (1280x720, 24-bit color)
+echo "[entrypoint] Cleaning up old Xvfb locks..."
+rm -f /tmp/.X99-lock
 echo "[entrypoint] Starting Xvfb on :99 (1280x720)..."
 Xvfb :99 -screen 0 1280x720x24 -ac &
 XVFB_PID=$!
