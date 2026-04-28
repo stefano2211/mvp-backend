@@ -44,7 +44,8 @@ RUN pip install --upgrade pip && \
         fastapi==0.115.6 \
         "uvicorn[standard]==0.34.0" \
         pydantic==2.10.6 \
-        pillow==11.1.0
+        pillow==11.1.0 \
+        openai
 
 # Download OmniParser V2 weights from HuggingFace
 RUN mkdir -p weights && \
