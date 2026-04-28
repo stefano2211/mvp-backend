@@ -215,11 +215,24 @@ Call plan_action() NOW.
 
     messages = result.get("messages", []) if isinstance(result, dict) else []
 
-    # Final System-2 reasoning is the last AI message
+    # Extract System-2 reasoning from the message graph.
+    # The last message may be a ToolMessage (plan_action result),
+    # so we walk backwards to find AIMessage content (the actual reasoning).
     final_message = ""
-    if messages:
-        last = messages[-1]
-        final_message = last.content if hasattr(last, "content") else str(last)
+    for msg in reversed(messages):
+        msg_type = type(msg).__name__
+        content = getattr(msg, "content", None)
+        if msg_type == "AIMessage" and content and isinstance(content, str) and content.strip():
+            final_message = content
+            break
+    # If no reasoning found, build a summary from the planned action
+    if not final_message:
+        for msg in messages:
+            msg_type = type(msg).__name__
+            if msg_type == "AIMessage" and hasattr(msg, "tool_calls") and msg.tool_calls:
+                tc = msg.tool_calls[0]
+                final_message = f"[Action decided: {tc.get('name', '?')}({json.dumps(tc.get('args', {}))[:300]})]"
+                break
 
     # Retrieve the one action planned via plan_action tool
     planned_actions = get_planned_actions()

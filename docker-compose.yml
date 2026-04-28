@@ -138,6 +138,28 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
+  # ─────────────────────────────────────────────
+  # Service 6: Virtual Desktop Executor
+  # Runs a headless Linux desktop (Xvfb + Chromium)
+  # with the screenshot capture loop. Replaces the
+  # need for a physical Windows machine.
+  # ─────────────────────────────────────────────
+  optimus_executor:
+    build:
+      context: ./windows_client
+      dockerfile: Dockerfile
+    container_name: optimus_executor
+    environment:
+      - OPTIMUS_API_URL=http://optimus_api:8000
+      - SCREENSHOT_INTERVAL_SECONDS=2
+      - DISPLAY=:99
+    networks:
+      - optimus_net
+    depends_on:
+      optimus_api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   shared_data:
     driver: local
