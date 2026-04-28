@@ -39,7 +39,7 @@ RUN pip install --upgrade pip && \
         timm \
         einops==0.8.0 \
         paddlepaddle \
-        paddleocr \
+        paddleocr==2.7.3 \
         huggingface_hub \
         fastapi==0.115.6 \
         "uvicorn[standard]==0.34.0" \

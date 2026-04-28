@@ -336,10 +336,10 @@ with gr.Blocks(
     )
 
     # Auto-refresh every 3 seconds
-    demo.load(
+    timer = gr.Timer(3)
+    timer.tick(
         fn=refresh_dashboard,
         outputs=all_result_outputs,
-        every=3,
     )
 
 
