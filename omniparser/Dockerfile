@@ -30,7 +30,7 @@ RUN pip install --upgrade pip && \
     pip install \
         easyocr \
         supervision==0.18.0 \
-        transformers \
+        transformers==4.47.1 \
         ultralytics==8.3.70 \
         numpy==1.26.4 \
         opencv-python-headless \
