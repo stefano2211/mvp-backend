@@ -31,7 +31,6 @@ echo "[entrypoint] Launching Chromium..."
 chromium \
     --no-sandbox \
     --disable-gpu \
-    --disable-software-rasterizer \
     --disable-dev-shm-usage \
     --window-size=1280,720 \
     --window-position=0,0 \
