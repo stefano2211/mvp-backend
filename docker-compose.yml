@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────
-  # Service 4: vLLM Engine (Qwen3.5-27B-FP8)
+  # Service 4: vLLM Engine (Qwen3.5-9B)
   # ─────────────────────────────────────────────
   vllm_engine:
     image: vllm/vllm-openai:latest
@@ -83,7 +83,16 @@ services:
       - "8002:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
-    command: --model Qwen/Qwen3.5-27B-FP8 --max-model-len 16384 --gpu-memory-utilization 0.80 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+    command: >-
+      vllm serve Qwen/Qwen3.5-9B
+      --port 8000
+      --max-model-len 32768
+      --gpu-memory-utilization 0.90
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --enable-prefix-caching
+      --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     networks:
