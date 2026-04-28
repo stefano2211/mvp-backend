@@ -7,19 +7,24 @@ coordinates System-1 subagents and produces the final action plan.
 Supports two modes:
   - run_step(): Step-by-step screenshot loop (primary mode)
   - run_pipeline(): Legacy single-shot mode (kept for compatibility)
+
+Architecture (v3 — Flat):
+  Instead of nesting subagents inside the LangGraph orchestrator
+  (which caused infinite recursion loops with the 9B model), we now
+  pre-compute subagent results in Python and inject them as context.
+  The orchestrator LLM only needs to call plan_action() once.
 """
 import json
 import os
+import traceback
 
 from deepagents import create_deep_agent
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import ToolMessage
 
 from prompts.system2_orchestrator import SYSTEM2_ORCHESTRATOR_PROMPT
-from subagents.sensor_classifier import sensor_classifier_subagent
-from subagents.screen_analyzer import screen_analyzer_subagent
-
 from tools.action_tools import plan_action, get_planned_actions, clear_action_log
+from tools.sensor_tools import get_sensor_data, list_active_alerts
+from tools.screen_tools import get_latest_screenshot
 
 # ─── Model Configuration ─────────────────────────────────────────────────────
 # All models are served by the local vLLM container via its OpenAI-compatible API.
@@ -29,9 +34,7 @@ VLLM_API_KEY = os.getenv("LOCAL_VLLM_API_KEY", "not-needed-for-local")
 # System-2 (slow, deliberate reasoning) — main orchestrator.
 ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "Qwen/Qwen3.5-9B")
 
-# Build a real ChatOpenAI client pointing at vLLM. We pass the model object
-# directly to deepagents instead of a "provider:model" string so that the
-# custom base_url (vLLM) is honored.
+# Build a real ChatOpenAI client pointing at vLLM.
 system2_llm = ChatOpenAI(
     model=ORCHESTRATOR_MODEL,
     base_url=VLLM_BASE_URL,
@@ -41,39 +44,59 @@ system2_llm = ChatOpenAI(
     timeout=240.0,
 )
 
-# ─── Build the Deep Agent ────────────────────────────────────────────────────
-# NOTE: deepagents.create_deep_agent does NOT accept a `name` kwarg.
+# ─── Build the Deep Agent (FLAT — no subagents) ─────────────────────────────
+# The orchestrator only has plan_action as a tool. Subagent results
+# are pre-computed and injected into the user message as context.
 orchestrator = create_deep_agent(
     model=system2_llm,
     system_prompt=SYSTEM2_ORCHESTRATOR_PROMPT,
     tools=[plan_action],
-    subagents=[
-        sensor_classifier_subagent,   # System-1: fast sensor classification
-        screen_analyzer_subagent,     # System-1: visual screen analysis (VLM)
-    ],
+    subagents=[],  # No nested subagents — prevents infinite recursion
 )
 
 
-def _extract_subagent_results(messages: list) -> tuple[str | None, str | None]:
+def _run_sensor_classification(alert: dict) -> str:
     """
-    Walk the message graph returned by the orchestrator and pull out the
-    raw output of each System-1 subagent. deepagents exposes subagent
-    invocations as ToolMessage entries whose `name` field equals the
-    subagent name registered in `create_deep_agent(subagents=[...])`.
+    Pre-compute sensor classification (System-1) synchronously.
+    Calls the same tools the subagent would have called, but directly in Python.
     """
-    screen_analysis: str | None = None
-    sensor_analysis: str | None = None
+    sensor_id = alert.get("sensor", "")
+    try:
+        sensor_data = get_sensor_data(sensor_id)
+        alerts_data = list_active_alerts()
+        return (
+            f"SENSOR DATA for {sensor_id}:\n{sensor_data}\n\n"
+            f"ACTIVE ALERTS:\n{alerts_data}"
+        )
+    except Exception as e:
+        return f"Sensor classification failed: {e}"
 
-    for msg in messages:
-        if isinstance(msg, ToolMessage):
-            tool_name = getattr(msg, "name", None) or ""
-            content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
-            if "screen-analyzer" in tool_name and not screen_analysis:
-                screen_analysis = content
-            elif "sensor-classifier" in tool_name and not sensor_analysis:
-                sensor_analysis = content
 
-    return screen_analysis, sensor_analysis
+def _run_screen_analysis() -> tuple[str, str | None]:
+    """
+    Pre-compute screen analysis (System-1) synchronously.
+    Calls OmniParser via the get_latest_screenshot tool directly.
+    Returns (text_description, image_b64_url_or_None).
+    """
+    try:
+        result = get_latest_screenshot()
+        if isinstance(result, list):
+            # Multimodal format: [{"type":"text", "text": ...}, {"type":"image_url", ...}]
+            text_part = ""
+            image_url = None
+            for item in result:
+                if item.get("type") == "text":
+                    text_part = item.get("text", "")
+                elif item.get("type") == "image_url":
+                    image_url = item.get("image_url", {}).get("url")
+            return text_part, image_url
+        elif isinstance(result, str):
+            parsed = json.loads(result)
+            return json.dumps(parsed, indent=2), None
+        else:
+            return str(result), None
+    except Exception as e:
+        return f"Screen analysis failed: {e}", None
 
 
 async def run_step(
@@ -85,8 +108,11 @@ async def run_step(
     """
     Execute ONE step of the screenshot loop.
 
-    The orchestrator analyzes the current screen state and action history,
-    then returns EXACTLY ONE next micro-action to execute.
+    v3 Architecture (Flat):
+      1. Pre-compute sensor data (Python — no LLM call)
+      2. Pre-compute screen analysis via OmniParser (Python — no LLM call)
+      3. Inject both results as context into the orchestrator prompt
+      4. The orchestrator only needs to call plan_action() — ONE LLM call
 
     Args:
         alert: The industrial alert dictionary
@@ -99,18 +125,13 @@ async def run_step(
     """
     clear_action_log()
 
-    # Build sensor info JSON
-    sensor_info = json.dumps({
-        "sensor_id": alert.get("sensor"),
-        "current_value": alert.get("value"),
-        "unit": alert.get("unit"),
-        "threshold": alert.get("threshold"),
-        "location": alert.get("location"),
-        "severity": alert.get("severity"),
-        "task_description": alert.get("task"),
-    }, indent=2)
+    # ── Step 1: Pre-compute sensor classification (System-1) ─────────────
+    sensor_info = _run_sensor_classification(alert)
 
-    # Build action history context for the prompt
+    # ── Step 2: Pre-compute screen analysis (System-1) ───────────────────
+    screen_text, screen_image_url = _run_screen_analysis()
+
+    # ── Step 3: Build action history context ──────────────────────────────
     if action_history:
         history_lines = "\n\nACTIONS ALREADY EXECUTED IN THIS CYCLE:\n"
         for i, item in enumerate(action_history):
@@ -122,35 +143,44 @@ async def run_step(
     else:
         history_lines = "\n\nACTIONS ALREADY EXECUTED: None — this is the first step."
 
-    screenshot_note = (
-        "A screenshot of the current operator screen is available. "
-        "Use the screen-analyzer subagent to analyze it before deciding the action."
-        if screenshot_b64
-        else "No screenshot is currently available from the Windows client."
-    )
-
     # The VLM prompt is the high-level goal sent to the screen analyzer
     vlm_prompt = (
         f"Goal: {alert.get('task', 'Resolve the industrial alert')}. "
         f"Step {step_number + 1}. Focus on the browser or relevant industrial application."
     )
 
-    # Full user message for the orchestrator
-    user_message = f"""INDUSTRIAL ALERT — STEP {step_number + 1}:
+    # ── Step 4: Build the full user message with pre-computed context ─────
+    user_message_text = f"""INDUSTRIAL ALERT — STEP {step_number + 1}:
+
+TASK: {alert.get('task', 'Resolve the industrial alert')}
+SEVERITY: {alert.get('severity', 'UNKNOWN')}
+SENSOR: {alert.get('sensor', '?')} = {alert.get('value', '?')} {alert.get('unit', '')} (threshold: {alert.get('threshold', '?')})
+LOCATION: {alert.get('location', '?')}
+
+── SENSOR ANALYSIS (pre-computed) ──
 {sensor_info}
+
+── SCREEN ANALYSIS (pre-computed from OmniParser) ──
+{screen_text}
 {history_lines}
 
-Screen Status: {screenshot_note}
+── YOUR TASK ──
+Based on the sensor data and screen analysis above:
+1. Determine the SINGLE NEXT action to execute on the screen.
+2. Call plan_action() with EXACTLY ONE action. Use coordinates from the screen analysis.
+3. If the goal is already complete, call plan_action(action_type="done").
 
-VLM Context: {vlm_prompt}
-
-YOUR TASK FOR THIS STEP:
-1. Use the sensor-classifier subagent to review urgency and alert type.
-2. Use the screen-analyzer subagent to analyze the CURRENT screen state precisely.
-3. Based on the screen state and action history, determine the SINGLE NEXT action.
-4. Call plan_action() with EXACTLY ONE action.
-5. If the goal is already complete, call plan_action(action_type="done").
+Call plan_action() NOW.
 """
+
+    # Build the message content (text + optional image)
+    if screen_image_url:
+        user_content = [
+            {"type": "text", "text": user_message_text},
+            {"type": "image_url", "image_url": {"url": screen_image_url}},
+        ]
+    else:
+        user_content = user_message_text
 
     # The LLM prompt is what we send to the orchestrator (for UI transparency)
     llm_prompt = (
@@ -159,12 +189,29 @@ YOUR TASK FOR THIS STEP:
         f"History: {len(action_history)} actions done"
     )
 
-    # Invoke the orchestrator with a recursion limit to prevent infinite loops.
-    # With 2 subagents + tool calls, 28 steps is more than enough for one action.
-    result = await orchestrator.ainvoke(
-        {"messages": [{"role": "user", "content": user_message}]},
-        config={"recursion_limit": 28},
-    )
+    # ── Step 5: Invoke the orchestrator ──────────────────────────────────
+    # With the flat architecture, the orchestrator only needs to:
+    #   1. Read the pre-computed context
+    #   2. Call plan_action() once
+    # This should complete in 3-4 LangGraph recursions max.
+    try:
+        result = await orchestrator.ainvoke(
+            {"messages": [{"role": "user", "content": user_content}]},
+            config={"recursion_limit": 15},
+        )
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[orchestrator] ainvoke failed: {e}\n{tb}")
+        # Fallback: return a wait action so the loop doesn't crash
+        return {
+            "screen_analysis": screen_text,
+            "system1": sensor_info,
+            "system2": f"Orchestrator error: {e}",
+            "vlm_prompt": vlm_prompt,
+            "llm_prompt": llm_prompt,
+            "next_action": {"action_type": "wait", "seconds": 3.0,
+                            "description": f"Orchestrator error — retrying. Error: {str(e)[:200]}"},
+        }
 
     messages = result.get("messages", []) if isinstance(result, dict) else []
 
@@ -182,12 +229,9 @@ YOUR TASK FOR THIS STEP:
         else {"action_type": "done", "description": "No action planned"}
     )
 
-    # Extract real subagent outputs from the message graph
-    screen_analysis, system1_result = _extract_subagent_results(messages)
-
     return {
-        "screen_analysis": screen_analysis,
-        "system1": system1_result,
+        "screen_analysis": screen_text,
+        "system1": sensor_info,
         "system2": final_message,
         "vlm_prompt": vlm_prompt,
         "llm_prompt": llm_prompt,
