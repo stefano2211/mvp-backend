@@ -37,6 +37,7 @@ sensor_llm = ChatOpenAI(
     base_url=VLLM_BASE_URL,
     api_key=VLLM_API_KEY,
     temperature=float(os.getenv("SYSTEM1_TEMPERATURE", "0.1")),
+    max_tokens=512,
     timeout=60.0,
 )
 

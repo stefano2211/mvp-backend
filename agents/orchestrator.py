@@ -37,6 +37,7 @@ system2_llm = ChatOpenAI(
     base_url=VLLM_BASE_URL,
     api_key=VLLM_API_KEY,
     temperature=float(os.getenv("ORCHESTRATOR_TEMPERATURE", "0.2")),
+    max_tokens=2048,
     timeout=240.0,
 )
 
@@ -158,10 +159,12 @@ YOUR TASK FOR THIS STEP:
         f"History: {len(action_history)} actions done"
     )
 
-    # Invoke the orchestrator
-    result = await orchestrator.ainvoke({
-        "messages": [{"role": "user", "content": user_message}]
-    })
+    # Invoke the orchestrator with a recursion limit to prevent infinite loops.
+    # With 2 subagents + tool calls, 28 steps is more than enough for one action.
+    result = await orchestrator.ainvoke(
+        {"messages": [{"role": "user", "content": user_message}]},
+        config={"recursion_limit": 28},
+    )
 
     messages = result.get("messages", []) if isinstance(result, dict) else []
 

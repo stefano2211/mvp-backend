@@ -84,6 +84,15 @@ Based on the screen-analyzer output, pick the most reliable approach:
 - If the application crashes or freezes (screen unchanged after 3 attempts), call plan_action(action_type="done", description="Application unresponsive — manual intervention required").
 - If a login or authentication prompt appears, call plan_action(action_type="done", description="Authentication required — cannot proceed without credentials").
 
+## CRITICAL: Anti-Loop Rules
+- You MUST call plan_action() EXACTLY ONCE after analyzing the screen. This is mandatory.
+- Do NOT call sensor-classifier more than once per step.
+- Do NOT call screen-analyzer more than once per step.
+- After receiving subagent results, IMMEDIATELY call plan_action(). Do not delegate again.
+- The correct flow is: sensor-classifier → screen-analyzer → plan_action(). That's it. Three calls maximum.
+- If you are unsure what action to take, call plan_action(action_type="wait", seconds=2.0, description="Reassessing screen state").
+- NEVER repeat a subagent call you already made in this step.
+
 ## Industrial Priority
 - CRITICAL severity: Act immediately, safety first. Skip non-essential steps.
 - HIGH severity: Urgent, execute within 5 minutes.
